@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Investment Return Calculator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            swpMain: '#30415d',
+            swpBlue: '#88a4ca',
+            swpPink: '#e93a55'
+          },
+          boxShadow: {
+            panel: '0 18px 48px rgba(48, 65, 93, 0.14)',
+            insetSoft: 'inset 0 1px 0 rgba(255,255,255,0.25)'
+          }
+        }
+      }
+    }
+  </script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --swp-main: #30415d;
+      --swp-blue: #88a4ca;
+      --swp-pink: #e93a55;
+      --track: #d7dde7;
+      --thumb-ring: rgba(136, 164, 202, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(136, 164, 202, 0.14), transparent 34%),
+        linear-gradient(180deg, #eef2f8 0%, #f6f8fb 100%);
+      font-family: 'Montserrat', sans-serif;
+      color: #1f2937;
+    }
+
+    .title-font { font-family: 'Playfair Display', serif; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--swp-main) 0%, var(--swp-main) var(--fill, 50%), var(--track) var(--fill, 50%), var(--track) 100%);
+      outline: none;
+      transition: box-shadow .2s ease;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: white;
+      border: 2px solid var(--swp-blue);
+      box-shadow: 0 0 0 6px var(--thumb-ring), 0 4px 12px rgba(48, 65, 93, 0.18);
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: white;
+      border: 2px solid var(--swp-blue);
+      box-shadow: 0 0 0 6px var(--thumb-ring), 0 4px 12px rgba(48, 65, 93, 0.18);
+      cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-track {
+      height: 8px;
+      border-radius: 999px;
+      background: transparent;
+    }
+
+    .number-input {
+      border: 1px solid rgba(48, 65, 93, 0.2);
+      background: rgba(255,255,255,0.92);
+      transition: border-color .2s ease, box-shadow .2s ease;
+    }
+
+    .number-input:focus {
+      border-color: var(--swp-blue);
+      box-shadow: 0 0 0 4px rgba(136, 164, 202, 0.18);
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useMemo, useState } = React;
+
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+    const formatCurrency = (value, decimals = 0) => new Intl.NumberFormat('en-GB', {
+      style: 'currency',
+      currency: 'GBP',
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(Number.isFinite(value) ? value : 0);
+
+    const formatPercent = (value, decimals = 2) => `${Number(value).toFixed(decimals)}%`;
+
+    const calculateFutureValue = (contribution, ratePercent, years) => {
+      const r = ratePercent / 100;
+      const n = Math.max(0, Math.floor(years));
+      if (n === 0) return 0;
+      if (r === 0) return contribution * n;
+      return contribution * (((1 + r) ** n - 1) / r);
+    };
+
+    const buildProjection = (contribution, ratePercent, years) => {
+      const r = ratePercent / 100;
+      const rows = [];
+      let balance = 0;
+      for (let year = 0; year <= years; year += 1) {
+        if (year === 0) {
+          rows.push({
+            year,
+            contributions: 0,
+            balance: 0,
+            returns: 0,
+          });
+          continue;
+        }
+        balance = (balance * (1 + r)) + contribution;
+        const contributions = contribution * year;
+        rows.push({
+          year,
+          contributions,
+          balance,
+          returns: Math.max(balance - contributions, 0),
+        });
+      }
+      return rows;
+    };
+
+    const IconBase = ({ children, className = 'w-5 h-5' }) => (
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={className}
+      >
+        {children}
+      </svg>
+    );
+
+    const WalletIcon = ({ className }) => (
+      <IconBase className={className}>
+        <path d="M20 7H5.5A2.5 2.5 0 0 1 3 4.5 2.5 2.5 0 0 1 5.5 2H18" />
+        <path d="M3 5v14a2 2 0 0 0 2 2h15V7H5a2 2 0 0 1-2-2Z" />
+        <path d="M16 14h.01" />
+      </IconBase>
+    );
+
+    const ClockIcon = ({ className }) => (
+      <IconBase className={className}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </IconBase>
+    );
+
+    const PercentIcon = ({ className }) => (
+      <IconBase className={className}>
+        <line x1="19" y1="5" x2="5" y2="19" />
+        <circle cx="6.5" cy="6.5" r="2.5" />
+        <circle cx="17.5" cy="17.5" r="2.5" />
+      </IconBase>
+    );
+
+    const StatCard = ({ label, value, detail }) => (
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-insetSoft backdrop-blur-sm">
+        <div className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-300">{label}</div>
+        <div className="mt-2 text-2xl font-semibold text-white">{value}</div>
+        <div className="mt-1 text-sm text-slate-300">{detail}</div>
+      </div>
+    );
+
+    const SliderRow = ({
+      label,
+      icon,
+      min,
+      max,
+      step,
+      value,
+      onSliderChange,
+      inputValue,
+      onInputChange,
+      onInputBlur,
+      displayValue,
+      helper,
+      inputPrefix = '',
+      inputSuffix = '',
+    }) => {
+      const fill = `${((value - min) / (max - min)) * 100}%`;
+      return (
+        <div className="grid gap-5 rounded-[28px] border border-slate-200/70 bg-white/90 p-5 shadow-panel md:grid-cols-[1.15fr_220px] md:items-center">
+          <div>
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-swpMain text-white shadow-lg shadow-swpMain/20">
+                {icon}
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800">{label}</h3>
+                <p className="text-sm text-slate-500">{helper}</p>
+              </div>
+            </div>
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={value}
+              onChange={onSliderChange}
+              style={{ '--fill': fill }}
+              aria-label={label}
+            />
+            <div className="mt-2 flex justify-between text-xs font-medium text-slate-400">
+              <span>{min.toLocaleString('en-GB')}{inputSuffix === '%' ? '%' : ''}</span>
+              <span>{max.toLocaleString('en-GB')}{inputSuffix === '%' ? '%' : ''}</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-sm font-semibold text-slate-600">Value</label>
+            <div className="relative">
+              {inputPrefix ? <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">{inputPrefix}</span> : null}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={inputValue}
+                onChange={onInputChange}
+                onBlur={onInputBlur}
+                className={`number-input h-14 w-full rounded-2xl px-4 text-right text-lg font-semibold text-slate-800 ${inputPrefix ? 'pl-10' : ''} ${inputSuffix ? 'pr-12' : ''}`}
+                aria-label={`${label} input`}
+              />
+              {inputSuffix ? <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-500">{inputSuffix}</span> : null}
+            </div>
+            <p className="mt-2 text-right text-sm font-medium text-swpMain">{displayValue}</p>
+          </div>
+        </div>
+      );
+    };
+
+    const AreaChart = ({ data }) => {
+      const width = 960;
+      const height = 420;
+      const margin = { top: 30, right: 26, bottom: 52, left: 84 };
+      const maxValue = Math.max(...data.map((d) => d.balance), 1);
+      const chartWidth = width - margin.left - margin.right;
+      const chartHeight = height - margin.top - margin.bottom;
+      const yearMax = Math.max(data[data.length - 1]?.year || 1, 1);
+
+      const xScale = (year) => margin.left + (year / yearMax) * chartWidth;
+      const yScale = (value) => margin.top + chartHeight - ((value / maxValue) * chartHeight);
+
+      const buildAreaPath = (key) => {
+        const top = data.map((d, index) => `${index === 0 ? 'M' : 'L'} ${xScale(d.year)} ${yScale(d[key])}`).join(' ');
+        const bottom = data.slice().reverse().map((d) => `L ${xScale(d.year)} ${yScale(0)}`).join(' ');
+        return `${top} ${bottom} Z`;
+      };
+
+      const yTicks = Array.from({ length: 5 }, (_, i) => Math.round((maxValue / 4) * i));
+      const xTicks = (() => {
+        const step = Math.max(1, Math.ceil(yearMax / 10));
+        const ticks = [];
+        for (let i = 0; i <= yearMax; i += step) ticks.push(i);
+        if (ticks[ticks.length - 1] !== yearMax) ticks.push(yearMax);
+        return ticks;
+      })();
+
+      return (
+        <div className="rounded-[32px] border border-slate-200/70 bg-white/90 p-5 shadow-panel md:p-7">
+          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="title-font text-3xl text-slate-800">Your Contributions vs Your Investment Return</h2>
+              <p className="mt-1 text-sm text-slate-500">A year-by-year projection based on regular annual contributions and compound growth.</p>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                <span className="h-3 w-3 rounded-sm bg-swpBlue"></span>
+                Contributions
+              </div>
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                <span className="h-3 w-3 rounded-sm bg-swpMain"></span>
+                Investment Return
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <svg viewBox={`0 0 ${width} ${height}`} className="min-w-[760px] w-full">
+              <defs>
+                <linearGradient id="returnsFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#30415d" stopOpacity="0.95" />
+                  <stop offset="100%" stopColor="#30415d" stopOpacity="0.72" />
+                </linearGradient>
+                <linearGradient id="contributionsFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#88a4ca" stopOpacity="0.95" />
+                  <stop offset="100%" stopColor="#88a4ca" stopOpacity="0.72" />
+                </linearGradient>
+              </defs>
+
+              {yTicks.map((tick, index) => (
+                <g key={`y-${index}`}>
+                  <line
+                    x1={margin.left}
+                    x2={width - margin.right}
+                    y1={yScale(tick)}
+                    y2={yScale(tick)}
+                    stroke="#d6deea"
+                    strokeDasharray={index === 0 ? '0' : '4 6'}
+                  />
+                  <text
+                    x={margin.left - 12}
+                    y={yScale(tick) + 4}
+                    textAnchor="end"
+                    fontSize="13"
+                    fill="#64748b"
+                    fontFamily="Montserrat, sans-serif"
+                  >
+                    {Math.round(tick).toLocaleString('en-GB')}
+                  </text>
+                </g>
+              ))}
+
+              {xTicks.map((tick, index) => (
+                <g key={`x-${index}`}>
+                  <line
+                    x1={xScale(tick)}
+                    x2={xScale(tick)}
+                    y1={height - margin.bottom}
+                    y2={height - margin.bottom + 8}
+                    stroke="#94a3b8"
+                  />
+                  <text
+                    x={xScale(tick)}
+                    y={height - margin.bottom + 26}
+                    textAnchor="middle"
+                    fontSize="13"
+                    fill="#64748b"
+                    fontFamily="Montserrat, sans-serif"
+                  >
+                    {tick}
+                  </text>
+                </g>
+              ))}
+
+              <text
+                x={width / 2}
+                y={height - 10}
+                textAnchor="middle"
+                fontSize="14"
+                fill="#475569"
+                fontFamily="Montserrat, sans-serif"
+                fontWeight="600"
+              >
+                Years
+              </text>
+
+              <text
+                x="22"
+                y={height / 2}
+                transform={`rotate(-90 22 ${height / 2})`}
+                textAnchor="middle"
+                fontSize="14"
+                fill="#475569"
+                fontFamily="Montserrat, sans-serif"
+                fontWeight="600"
+              >
+                Portfolio Value (£)
+              </text>
+
+              <path d={buildAreaPath('balance')} fill="url(#returnsFill)" opacity="0.95" />
+              <path d={buildAreaPath('contributions')} fill="url(#contributionsFill)" opacity="0.96" />
+              <path
+                d={data.map((d, index) => `${index === 0 ? 'M' : 'L'} ${xScale(d.year)} ${yScale(d.balance)}`).join(' ')}
+                fill="none"
+                stroke="#203047"
+                strokeWidth="3"
+              />
+              <path
+                d={data.map((d, index) => `${index === 0 ? 'M' : 'L'} ${xScale(d.year)} ${yScale(d.contributions)}`).join(' ')}
+                fill="none"
+                stroke="#e8eef7"
+                strokeWidth="2.2"
+                opacity="0.85"
+              />
+            </svg>
+          </div>
+        </div>
+      );
+    };
+
+    function App() {
+      const [contribution, setContribution] = useState(10000);
+      const [years, setYears] = useState(20);
+      const [rate, setRate] = useState(5);
+
+      const [contributionInput, setContributionInput] = useState('10,000');
+      const [yearsInput, setYearsInput] = useState('20');
+      const [rateInput, setRateInput] = useState('5.00');
+
+      const projection = useMemo(() => buildProjection(contribution, rate, years), [contribution, rate, years]);
+      const endingValue = useMemo(() => calculateFutureValue(contribution, rate, years), [contribution, rate, years]);
+      const totalContributions = contribution * years;
+      const totalReturns = Math.max(endingValue - totalContributions, 0);
+      const contributionShare = endingValue > 0 ? (totalContributions / endingValue) * 100 : 0;
+      const returnsShare = endingValue > 0 ? (totalReturns / endingValue) * 100 : 0;
+
+      const sanitiseNumber = (raw) => raw.replace(/[^\d.]/g, '');
+
+      const commitContribution = () => {
+        const parsed = parseFloat(sanitiseNumber(contributionInput));
+        const safeValue = clamp(Number.isFinite(parsed) ? parsed : contribution, 0, 100000);
+        setContribution(Math.round(safeValue));
+        setContributionInput(Math.round(safeValue).toLocaleString('en-GB'));
+      };
+
+      const commitYears = () => {
+        const parsed = parseFloat(sanitiseNumber(yearsInput));
+        const safeValue = clamp(Number.isFinite(parsed) ? parsed : years, 1, 50);
+        setYears(Math.round(safeValue));
+        setYearsInput(String(Math.round(safeValue)));
+      };
+
+      const commitRate = () => {
+        const parsed = parseFloat(sanitiseNumber(rateInput));
+        const safeValue = clamp(Number.isFinite(parsed) ? parsed : rate, 0, 15);
+        setRate(Number(safeValue.toFixed(2)));
+        setRateInput(Number(safeValue).toFixed(2));
+      };
+
+      return (
+        <div className="min-h-screen px-4 py-6 md:px-6 lg:px-8">
+          <div className="mx-auto max-w-7xl overflow-hidden rounded-[34px] border border-slate-200/80 bg-white/60 shadow-2xl shadow-slate-300/30 backdrop-blur-sm">
+            <header className="bg-gradient-to-r from-swpMain via-[#395170] to-swpMain px-6 py-5 md:px-8 md:py-6">
+              <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold uppercase tracking-[0.3em] text-swpBlue">Strategic Wealth Partners</p>
+                  <h1 className="title-font text-4xl text-white md:text-5xl">Investment Return Calculator</h1>
+                </div>
+                <p className="max-w-xl text-sm leading-6 text-slate-200 md:text-right">
+                  Model how regular annual contributions and compound growth work together over time.
+                </p>
+              </div>
+            </header>
+
+            <main className="space-y-6 p-4 md:p-6 lg:p-8">
+              <AreaChart data={projection} />
+
+              <div className="grid gap-5">
+                <SliderRow
+                  label="Annual Contribution"
+                  icon={<WalletIcon className="h-5 w-5" />}
+                  min={0}
+                  max={100000}
+                  step={500}
+                  value={contribution}
+                  onSliderChange={(e) => {
+                    const next = Number(e.target.value);
+                    setContribution(next);
+                    setContributionInput(next.toLocaleString('en-GB'));
+                  }}
+                  inputValue={contributionInput}
+                  onInputChange={(e) => setContributionInput(e.target.value)}
+                  onInputBlur={commitContribution}
+                  displayValue={formatCurrency(contribution, 0)}
+                  helper="How much is added to the portfolio at the end of each year."
+                  inputPrefix="£"
+                />
+
+                <SliderRow
+                  label="Time Horizon"
+                  icon={<ClockIcon className="h-5 w-5" />}
+                  min={1}
+                  max={50}
+                  step={1}
+                  value={years}
+                  onSliderChange={(e) => {
+                    const next = Number(e.target.value);
+                    setYears(next);
+                    setYearsInput(String(next));
+                  }}
+                  inputValue={yearsInput}
+                  onInputChange={(e) => setYearsInput(e.target.value)}
+                  onInputBlur={commitYears}
+                  displayValue={`${years} year${years === 1 ? '' : 's'}`}
+                  helper="The number of years contributions stay invested."
+                />
+
+                <SliderRow
+                  label="Annual Rate of Return"
+                  icon={<PercentIcon className="h-5 w-5" />}
+                  min={0}
+                  max={15}
+                  step={0.1}
+                  value={rate}
+                  onSliderChange={(e) => {
+                    const next = Number(e.target.value);
+                    setRate(next);
+                    setRateInput(next.toFixed(2));
+                  }}
+                  inputValue={rateInput}
+                  onInputChange={(e) => setRateInput(e.target.value)}
+                  onInputBlur={commitRate}
+                  displayValue={formatPercent(rate, 2)}
+                  helper="The assumed annual growth rate before charges and tax."
+                  inputSuffix="%"
+                />
+              </div>
+
+              <section className="rounded-[30px] bg-gradient-to-br from-[#1f2e45] via-[#2a3b57] to-swpMain p-5 text-white shadow-2xl shadow-swpMain/25 md:p-7">
+                <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold uppercase tracking-[0.28em] text-swpBlue">Summary</p>
+                    <h2 className="title-font text-3xl">Projected outcome</h2>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
+                    Formula used: <span className="font-semibold text-white">FV = P × ((1 + r)<sup>n</sup> − 1) / r</span>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <StatCard
+                    label="Ending portfolio value"
+                    value={formatCurrency(endingValue, 0)}
+                    detail="Total projected value at the end of the selected term."
+                  />
+                  <StatCard
+                    label="Total contributions"
+                    value={formatCurrency(totalContributions, 0)}
+                    detail={`${contributionShare.toFixed(0)}% of ending portfolio value`}
+                  />
+                  <StatCard
+                    label="Total investment returns"
+                    value={formatCurrency(totalReturns, 0)}
+                    detail={`${returnsShare.toFixed(0)}% of ending portfolio value`}
+                  />
+                </div>
+              </section>
+            </main>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
